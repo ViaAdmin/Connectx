@@ -1,95 +1,96 @@
 # ConnectX NNUE Agent
 
-Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) 竞赛 agent：**Minimax（alpha-beta）+ NNUE 价值网络 + 自对弈强化学习**。当前公榜约 1200 分（34 / 254）。
+**English** | [简体中文](README.zh-CN.md)
 
-## 游戏玩法
+A Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) competition agent: **minimax (alpha-beta) + NNUE value network + self-play reinforcement learning**. Currently around 1200 on the public leaderboard (rank 34 / 254).
 
-ConnectX 即经典的**四子棋（Connect Four）**：6 行 × 7 列的竖直棋盘，双方轮流选择一列落子，棋子受重力下落到该列最低空位。率先在横、竖或斜方向连成 4 子者获胜，棋盘下满则为平局。
+## The Game
 
-规则简单，但状态空间约 4.5 万亿个合法局面，先手存在理论必胜策略（已被完全求解）——这使它成为检验搜索 + 评估函数架构的理想试验场：既小到可以深挖，又大到无法在线暴力算穿。
+ConnectX is the classic **Connect Four**: a vertical 6×7 board where two players take turns dropping a piece into a column; the piece falls to the lowest empty cell. The first player to line up 4 pieces horizontally, vertically, or diagonally wins; a full board is a draw.
 
-## 竞赛环境与约束
+The rules are simple, but the state space holds roughly 4.5 trillion legal positions, and the first player has a proven winning strategy (the game is strongly solved). This makes it an ideal proving ground for search + evaluation architectures: small enough to dig deep, yet too large to brute-force online.
 
-Kaggle 对弈环境的硬性约束，直接决定了本项目的设计取向：
+## Competition Constraints
 
-| 约束 | 应对设计 |
+The hard constraints of the Kaggle game environment directly shaped this project's design:
+
+| Constraint | Design response |
 |---|---|
-| **仅 CPU**，无 GPU | 评估网络必须极小（84→256→64→32→1），推理用纯 NumPy + 增量累加器，而非深度大网络 |
-| **每步约 2 秒**时间限制，超时判负 | 迭代加深 + 1.7s 墙钟中止，永远保有上一完整层的合法结果；异常兜底返回合法列 |
-| **单文件提交**，不便挂载外部依赖 | 权重 base64 内嵌，单文件自包含，运行时零下载 |
-| 对弈镜像 **NumPy 2.4 与 numba 不兼容** | 提交端搜索为纯 Python 位棋盘实现（训练 notebook 不受影响，照常用 numba） |
-| 小矩阵乘上**多线程 BLAS 反而更慢** | 强制单线程 BLAS，叶评估提速约 12 倍 |
+| **CPU only**, no GPU | The evaluation network must be tiny (84→256→64→32→1); inference is pure NumPy with an incremental accumulator, not a large deep net |
+| **~2 seconds per move**, timeout = loss | Iterative deepening + 1.7s wall-clock abort; a legal result from the last completed depth is always available; any exception falls back to a legal column |
+| **Single-file submission**, external dependencies are awkward | Weights embedded as base64; one self-contained file, zero downloads at runtime |
+| Game image ships **NumPy 2.4, incompatible with numba** | The submission-side search is pure-Python bitboards (training notebooks are unaffected and still use numba) |
+| **Multi-threaded BLAS is slower** on tiny matrix products | Force single-threaded BLAS; leaf evaluation ~12x faster |
 
-简言之：算力预算极紧，胜负取决于"单位 CPU 时间内的有效搜索深度"，所以工程优化（位棋盘、置换表、着法排序、增量评估）与模型本身同等重要。
+In short: the compute budget is extremely tight, and games are decided by "effective search depth per unit of CPU time" — so engineering optimizations (bitboards, transposition table, move ordering, incremental evaluation) matter as much as the model itself.
 
-## 前言
+## Preface
 
-立项时确立了 minimax + NNUE 的技术架构：因为对这个棋种不够熟悉，无法采用手工估值函数，所以必须走自对弈训练的路线。网络设计参考了 Stockfish 的 NNUE 项目，但 ConnectX 没有"王"这类天然的中心棋子可作特征锚点，最终选择了朴实无华的双视角 84 维 one-hot 编码。
+The minimax + NNUE architecture was settled at the very start: not knowing the game well enough to hand-craft an evaluation function, self-play training was the only viable route. The network design was inspired by Stockfish's NNUE, but ConnectX has no natural anchor piece like a king to build features around, so I settled on a plain dual-perspective 84-dimensional one-hot encoding.
 
-几个版本迭代之后，我发现模型对启发式搜索的对抗胜率不够高，于是着手增设人工棋盘特征，希望帮 NNUE 加快学习——结果训练出的多特征模型不但打不过 84 维模型，甚至打不过启发式搜索。只能舍弃多维特征方案，改用 85 维模型（追加一个 turn 维度帮助网络理解先后手信息），并用权重迁移技术从旧模型无损初始化。寄予厚望，但多个版本之后胜率依然很差：在 minimax 框架下与 84 维基座模型进行 200 局正反手对抗，胜率只有 28%。
+After several iterations, the model's win rate against heuristic search was not high enough, so I started adding hand-crafted board features to help the NNUE learn faster — only to find that the multi-feature models not only lost to the 84-dim model, but even lost to the heuristic search. I abandoned that approach and tried an 85-dim model (adding a turn dimension to convey side-to-move information), initialized losslessly from the old model via weight transfer. I had high hopes, but after many versions its win rate stayed poor: in 200 games against the 84-dim base model under the same minimax framework, playing both colors, it won only 28%.
 
-最终回到 84 维模型继续训练，同时为了在 Kaggle 提交第一个版本，对搜索算法做了系统性的工程优化。这个仓库就是这条路线沉淀下来的成果。
+In the end I returned to the 84-dim model and kept training, while systematically optimizing the search engine for the first Kaggle submission. This repository is what that path produced.
 
-## 文件清单
+## Files
 
-| 文件 | 作用 |
+| File | Purpose |
 |---|---|
-| `submission.py` | Kaggle 提交用 agent（自包含单文件；**不含模型权重**，需嵌入自己训练的权重后使用） |
-| `selfplay_training.ipynb` | 自对弈训练 notebook：数据生成 → 训练 → 对抗赛评估的完整迭代闭环 |
-| `model_evaluation.ipynb` | 对抗测试 notebook：NNUE vs NNUE 固定深度 / 限时比赛模式（迭代加深） |
+| `submission.py` | Kaggle submission agent (self-contained single file; **model weights not included** — embed your own trained weights before use) |
+| `selfplay_training.ipynb` | Self-play training notebook: the full iteration loop of data generation → training → arena evaluation |
+| `model_evaluation.ipynb` | Evaluation notebook: NNUE vs NNUE at fixed depth / timed match mode (iterative deepening) |
 
-## 技术栈
+## Tech Stack
 
-- **Python**：全部代码
-- **PyTorch**：NNUE 训练（推理端不依赖）
-- **NumPy**：提交端纯 NumPy 前向推理
-- **Numba**：训练与评测 notebook 中的位棋盘搜索 JIT 加速
-- **pandas / multiprocessing**：自对弈数据管理与并行对局
-- **kaggle-environments**：本地对弈仿真
+- **Python**: everything
+- **PyTorch**: NNUE training (not required at inference time)
+- **NumPy**: pure-NumPy forward pass on the submission side
+- **Numba**: JIT-accelerated bitboard search in the training and evaluation notebooks
+- **pandas / multiprocessing**: self-play data management and parallel games
+- **kaggle-environments**: local game simulation
 
-## 算法与实现
+## Algorithms & Implementation
 
-### NNUE 价值网络
+### NNUE Value Network
 
-- 输入 84 维双视角 one-hot（42 格己方 + 42 格对方），结构 `84 → 256 → 64 → 32 → 1 (tanh)`
-- 第一层采用**增量累加器**：落一子只需向累加器加一行权重，叶节点只算后三层
-- 提交端权重转置为 NNUE 布局后存 npz、base64 内嵌进单文件，运行时纯 NumPy 解码，不依赖 torch、不挂数据集
+- Input: 84-dim dual-perspective one-hot (42 own cells + 42 opponent cells); architecture `84 → 256 → 64 → 32 → 1 (tanh)`
+- The first layer uses an **incremental accumulator**: placing a piece just adds one weight row to the accumulator, so leaf nodes only compute the last three layers
+- On the submission side, weights are transposed into NNUE layout, saved as npz, and embedded as base64 in the single file; decoded at runtime with pure NumPy — no torch, no attached datasets
 
-### 自对弈强化学习
+### Self-Play Reinforcement Learning
 
-- **全程温度采样**：每一手对根节点 7 列的精确搜索分值做 softmax 温度采样，用受控随机贯穿全局制造局面多样性，而非靠随机开局
-- **证明值 / 评估值严格分离**：已证明终局用 `±(100+depth)` 编码，与 tanh 饱和到 ±1.0 的评估值互不混淆；必胜局面直接兑现，必败着法屏蔽不采样
-- **数据管线**：按局面去重 + 历史回放池（按比例抽取旧数据混训）
-- **训练**：验证集早停、迭代式微调
-- **对抗赛门控**：每轮训练后新旧模型正反手对抗，胜率不达标累计触发灾难回滚，防止自对弈退化
+- **Temperature sampling throughout**: every move applies softmax temperature sampling to the exact root search scores of all 7 columns — position diversity comes from controlled randomness across the whole game, not from random openings
+- **Strict separation of proven values and evaluations**: proven terminal results are encoded as `±(100+depth)`, never confused with tanh evaluations that saturate to ±1.0; proven wins are converted immediately, proven losses are masked out of sampling
+- **Data pipeline**: position-level deduplication + a history replay pool (a fixed ratio of old data mixed into each round)
+- **Training**: validation early stopping, iterative fine-tuning
+- **Arena gating**: after each round, new and old models play both colors; repeated sub-par win rates trigger a catastrophic rollback, preventing self-play degradation
 
-### 搜索（提交端）
+### Search (Submission Side)
 
-- **49 位位棋盘**：每列 7 bit（6 格 + 1 哨兵），四连判定 4 次位移运算
-- **alpha-beta + 迭代加深**：永远保有上一完整层结果，1.7s 墙钟中止（每 256 节点查一次钟，超时抛异常展开递归栈）
-- **置换表**：EXACT / LOWER / UPPER 三类条目，已证明结论 depth 记 99 永久复用，超上限整体清空
-- **动态着法排序**：TT 着法 > killer（每 ply 两个）> history 启发（剪枝着法 `+= depth²`），仅深节点排序
-- **LMR**：排序靠后的着法先浅搜，超窗再重搜
-- **对称剪枝**：局面左右对称时只搜一半着法
-- **即胜预检**：节点入口先查行棋方立即获胜着法
-- **工程细节**：强制单线程 BLAS（小矩阵乘多线程同步开销约 12 倍）；不用 numba（Kaggle 对弈镜像 NumPy 2.4 与 numba 不兼容，import 即判负）；任何异常兜底返回合法列
+- **49-bit bitboards**: 7 bits per column (6 cells + 1 sentinel); four-in-a-row detection is 4 shift operations
+- **Alpha-beta + iterative deepening**: a result from the last completed depth is always available; 1.7s wall-clock abort (clock checked every 256 nodes, timeout raises an exception to unwind the recursion in one go)
+- **Transposition table**: EXACT / LOWER / UPPER entries; proven results stored with depth 99 for permanent reuse; the table is cleared wholesale when it exceeds its size cap
+- **Dynamic move ordering**: TT move > killers (two per ply) > history heuristic (cutoff moves get `+= depth²`); ordering applied only at deep nodes
+- **LMR**: late moves are searched shallow first, re-searched on fail-high
+- **Symmetry pruning**: only half the moves are searched in left-right symmetric positions
+- **Immediate-win precheck**: each node first checks whether the side to move has an instant win
+- **Engineering details**: force single-threaded BLAS (multi-threaded sync overhead is ~12x on tiny matrix products); no numba (the Kaggle game image ships NumPy 2.4, incompatible with numba — importing it loses the game on the spot); any exception falls back to a legal column
 
-## 本仓库刻意不包含的部分
+## Deliberately Not Included
 
-本仓库的目的是把**思路和算法**贡献给社区，而不是提供一个可以直接上传即用的成品。以下组件在项目中实际使用，但刻意未包含：
+The purpose of this repository is to contribute **ideas and algorithms** to the community, not to hand out a ready-to-upload finished product. The following components are used in the project but deliberately omitted:
 
-- **训练好的模型权重**：`submission.py` 中的权重串为空占位符，需要用 `selfplay_training.ipynb` 训练出自己的模型再嵌入（格式说明见 `submission.py` 文件头部注释）
-- **启发式搜索 agent**：项目初期负责生成初始（初等）数据集、并长期作为陪练与评估基准的启发式估值搜索。窗口计分 + 中心控制的思路在社区教程中很常见，有能力的人可以自己实现
-- **开局库**：基于离线搜索构建的开局库即将在提交版本中启用，其构建 notebook、嵌入工具与库数据未开源
-- **权重嵌入工具**：将新训练的 `.pth` 转置、打包并替换 `submission.py` 内嵌权重串的小工具脚本未包含（按文件头部注释的布局说明自行完成即可）
+- **Trained model weights**: the weight string in `submission.py` is an empty placeholder; train your own model with `selfplay_training.ipynb` and embed it (format documented in the header comments of `submission.py`)
+- **Heuristic search agent**: the hand-crafted evaluation search that bootstrapped the initial dataset and served as a long-term sparring/evaluation baseline. Window scoring + center control is a well-known pattern in community tutorials — capable readers can implement their own
+- **Opening book**: an opening book built via offline search is about to ship in the submission version; its construction notebook, embedding tools, and book data are not open-sourced
+- **Weight embedding tool**: the small script that transposes a newly trained `.pth`, packs it, and replaces the embedded weight string in `submission.py` is not included (follow the layout notes in the file header to do it yourself)
 
-## 快速开始
+## Quick Start
 
-1. 训练：在 Kaggle notebook 中运行 `selfplay_training.ipynb`，配置区指定预训练模型 `nnue_model_pretrained.pth`（可选），产出 `/kaggle/working/nnue_model.pth`
-2. 评测：在 `model_evaluation.ipynb` 配置区选择模式（固定深度或限时比赛），填入模型路径运行
-3. 提交：把训练好的权重按 `submission.py` 头部注释的布局嵌入后上传 Kaggle（agent 入口为文件末尾的 `act` 函数）
+1. Training: run `selfplay_training.ipynb` in a Kaggle notebook; optionally point the config section at a pretrained `nnue_model_pretrained.pth`; it produces `/kaggle/working/nnue_model.pth`
+2. Evaluation: pick a mode in the config section of `model_evaluation.ipynb` (fixed depth or timed match), fill in model paths, and run
+3. Submission: embed your trained weights into `submission.py` following the layout in its header comments, then upload to Kaggle (the agent entry point is the `act` function at the end of the file)
 
-## 许可证
+## License
 
-本项目采用 [MIT License](LICENSE)：允许自由使用、修改、分发及商用，但在复制或使用本软件的实质部分时，须保留原版权声明与许可声明（即标注来源）。
-
+This project is released under the [MIT License](LICENSE): free to use, modify, distribute, and use commercially, provided the original copyright and license notice are retained in copies or substantial portions of the software (i.e., attribution required).
