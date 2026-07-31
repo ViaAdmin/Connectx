@@ -1,6 +1,6 @@
 # ConnectX NNUE Agent
 
-Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) 竞赛 agent：**Minimax（alpha-beta）+ NNUE 价值网络 + 自对弈强化学习**。当前公榜约 1180 分（34 / 254）。
+Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) 竞赛 agent：**Minimax（alpha-beta）+ NNUE 价值网络 + 自对弈强化学习**。当前公榜约 1200 分（34 / 254）。
 
 ## 游戏玩法
 
@@ -24,7 +24,7 @@ Kaggle 对弈环境的硬性约束，直接决定了本项目的设计取向：
 
 ## 前言
 
-这是我第一次参与 ConnectX 项目。立项时就确立了 minimax + NNUE 的技术架构：因为对这个棋种不够熟悉，无法采用手工估值函数，所以必须走自对弈训练的路线。网络设计参考了 Stockfish 的 NNUE 项目，但 ConnectX 没有"王"这类天然的中心棋子可作特征锚点，最终选择了朴实无华的双视角 84 维 one-hot 编码。
+立项时确立了 minimax + NNUE 的技术架构：因为对这个棋种不够熟悉，无法采用手工估值函数，所以必须走自对弈训练的路线。网络设计参考了 Stockfish 的 NNUE 项目，但 ConnectX 没有"王"这类天然的中心棋子可作特征锚点，最终选择了朴实无华的双视角 84 维 one-hot 编码。
 
 几个版本迭代之后，我发现模型对启发式搜索的对抗胜率不够高，于是着手增设人工棋盘特征，希望帮 NNUE 加快学习——结果训练出的多特征模型不但打不过 84 维模型，甚至打不过启发式搜索。只能舍弃多维特征方案，改用 85 维模型（追加一个 turn 维度帮助网络理解先后手信息），并用权重迁移技术从旧模型无损初始化。寄予厚望，但多个版本之后胜率依然很差：在 minimax 框架下与 84 维基座模型进行 200 局正反手对抗，胜率只有 28%。
 
