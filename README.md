@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) competition agent: **minimax (alpha-beta) + NNUE value network + self-play reinforcement learning**. Currently around 1200 on the public leaderboard (rank 34 / 254).
+A Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) competition agent: **minimax (alpha-beta) + NNUE value network + self-play reinforcement learning**. Currently around 1200 on the public leaderboard (rank 36 / 296).
 
 ## The Game
 
