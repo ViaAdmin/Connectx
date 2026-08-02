@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) 竞赛 agent：**Minimax（alpha-beta）+ NNUE 价值网络 + 自对弈强化学习**。当前公榜约 1200 分（34 / 254）。
+Kaggle [ConnectX](https://www.kaggle.com/competitions/connectx) 竞赛 agent：**Minimax（alpha-beta）+ NNUE 价值网络 + 自对弈强化学习**。当前公榜约 1200 分（36 / 296）。
 
 ## 游戏玩法
 
